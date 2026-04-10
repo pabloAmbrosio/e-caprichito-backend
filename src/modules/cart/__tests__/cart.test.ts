@@ -619,3 +619,130 @@ describe('Cupones', () => {
     expect(true).toBe(true);
   });
 });
+
+// ─── CONCURRENCIA: DOS CLIENTES, ÚLTIMO STOCK ─────────────────
+
+describe('Concurrencia: dos clientes pelean por el último stock', () => {
+  let token2: string;
+  let userId2: string;
+  let scarceProductId: string;
+
+  beforeAll(async () => {
+    // Segundo cliente
+    const customer2 = await db.user.create({
+      data: {
+        username: 'test_cart_customer2', email: 'test_cart_customer2@test.com',
+        phone: '+15556660002', passwordHash: await hashPassword('Test12345'),
+        adminRole: AdminRole.CUSTOMER, customerRole: CustomerRole.MEMBER,
+        phoneVerified: true, emailVerified: true,
+      },
+    });
+    userId2 = customer2.id;
+
+    const loginRes2 = await app.inject({
+      method: 'POST', url: '/api/auth/login',
+      payload: { identifier: 'test_cart_customer2', password: 'Test12345' },
+    });
+    token2 = loginRes2.json().data.accessToken;
+
+    // Producto con exactamente 1 de stock
+    const ap = await db.abstractProduct.create({
+      data: {
+        title: 'Último En Stock', slug: 'test-cart-scarce', description: 'Solo queda 1',
+        categoryId, tags: ['scarce'], status: ProductStatus.PUBLISHED,
+        publishedAt: new Date(), createdBy: sellerId,
+      },
+    });
+    const v = await db.product.create({
+      data: {
+        abstractProductId: ap.id, title: 'Último En Stock', sku: 'TEST-CART-SCARCE',
+        priceInCents: 30000, details: {},
+        images: [{ imageUrl: 'https://ph.com/scarce.jpg', thumbnailUrl: 'https://ph.com/scarce.jpg' }],
+        status: ProductStatus.PUBLISHED, createdBy: sellerId,
+      },
+    });
+    await db.inventory.create({ data: { productId: v.id, physicalStock: 1, reservedStock: 0 } });
+    scarceProductId = v.id;
+  });
+
+  afterAll(async () => {
+    await db.user.update({ where: { id: userId2 }, data: { activeCartId: null } }).catch(() => {});
+    await db.cartItem.deleteMany({ where: { cart: { customerId: userId2 } } });
+    await db.cart.deleteMany({ where: { customerId: userId2 } });
+    await db.inventory.deleteMany({ where: { product: { sku: 'TEST-CART-SCARCE' } } });
+    await db.product.deleteMany({ where: { sku: 'TEST-CART-SCARCE' } });
+    await db.abstractProduct.deleteMany({ where: { slug: 'test-cart-scarce' } });
+    await db.user.deleteMany({ where: { username: 'test_cart_customer2' } });
+  });
+
+  it('ambos clientes pueden agregar el producto al carrito (stock=1)', async () => {
+    // El carrito solo verifica isInStock (binario), no reserva unidades.
+    // Ambos pueden agregar al carrito — el conflicto se resuelve en checkout.
+    const [res1, res2] = await Promise.all([
+      app.inject({
+        method: 'POST', url: `${CART_URL}/items`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { productId: scarceProductId, quantity: 1 },
+      }),
+      app.inject({
+        method: 'POST', url: `${CART_URL}/items`,
+        headers: { authorization: `Bearer ${token2}` },
+        payload: { productId: scarceProductId, quantity: 1 },
+      }),
+    ]);
+
+    // Ambos pasan — el carrito no reserva stock
+    expect(res1.statusCode).toBe(200);
+    expect(res2.statusCode).toBe(200);
+  });
+
+  it('después de reservar stock para uno, el validate del otro detecta OUT_OF_STOCK', async () => {
+    // Simular que el checkout del cliente 1 reservó el stock
+    await db.inventory.updateMany({
+      where: { productId: scarceProductId },
+      data: { reservedStock: 1 }, // physical=1, reserved=1 → disponible=0
+    });
+
+    // El validate del cliente 2 detecta que ya no hay stock
+    const validateRes = await app.inject({
+      method: 'GET', url: `${CART_URL}/validate`,
+      headers: { authorization: `Bearer ${token2}` },
+    });
+
+    expect(validateRes.statusCode).toBe(200);
+    const issues = validateRes.json().data.issues;
+    expect(issues.some((i: any) => i.type === 'OUT_OF_STOCK')).toBe(true);
+
+    // Restaurar
+    await db.inventory.updateMany({
+      where: { productId: scarceProductId },
+      data: { reservedStock: 0 },
+    });
+  });
+
+  it('si el stock llega a 0, un tercer intento de agregar falla', async () => {
+    // Agotar stock completamente
+    await db.inventory.updateMany({
+      where: { productId: scarceProductId },
+      data: { reservedStock: 1 },
+    });
+
+    // Limpiar carrito del cliente 1 para poder probar un add fresco
+    await cleanupCarts();
+
+    const res = await app.inject({
+      method: 'POST', url: `${CART_URL}/items`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { productId: scarceProductId, quantity: 1 },
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('OUT_OF_STOCK');
+
+    // Restaurar
+    await db.inventory.updateMany({
+      where: { productId: scarceProductId },
+      data: { reservedStock: 0 },
+    });
+  });
+});
