@@ -80,7 +80,7 @@ describe("EnvSchema", () => {
       const env = { ...validEnv, NODE_ENV: val };
       // production requiere Google OAuth credentials
       if (val === "production") {
-        Object.assign(env, { GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret" });
+        Object.assign(env, { GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "secret", BASE_URL: "https://api.caprichito.com" });
       }
       const result = v.safeParse(EnvSchema, env);
       expect(result.success).toBe(true);
@@ -107,13 +107,13 @@ describe("EnvSchema", () => {
   // ── Forward: required in production ────────────────
 
   it("falla en production si falta GOOGLE_CLIENT_ID", () => {
-    const env = { ...validEnv, NODE_ENV: "production", GOOGLE_CLIENT_SECRET: "secret" };
+    const env = { ...validEnv, NODE_ENV: "production", GOOGLE_CLIENT_SECRET: "secret", BASE_URL: "https://api.caprichito.com" };
     const result = v.safeParse(EnvSchema, env);
     expect(result.success).toBe(false);
   });
 
   it("falla en production si falta GOOGLE_CLIENT_SECRET", () => {
-    const env = { ...validEnv, NODE_ENV: "production", GOOGLE_CLIENT_ID: "id" };
+    const env = { ...validEnv, NODE_ENV: "production", GOOGLE_CLIENT_ID: "id", BASE_URL: "https://api.caprichito.com" };
     const result = v.safeParse(EnvSchema, env);
     expect(result.success).toBe(false);
   });
@@ -124,6 +124,7 @@ describe("EnvSchema", () => {
       NODE_ENV: "production",
       GOOGLE_CLIENT_ID: "id",
       GOOGLE_CLIENT_SECRET: "secret",
+      BASE_URL: "https://api.caprichito.com",
     };
     const result = v.safeParse(EnvSchema, env);
     expect(result.success).toBe(true);
