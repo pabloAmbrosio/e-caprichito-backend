@@ -1,0 +1,445 @@
+// E-Caprichito — Pegar en https://dbdiagram.io/d
+
+// ─── ENUMS ──────────────────────────────────────────
+
+Enum AdminRole {
+  OWNER
+  ADMIN
+  MANAGER
+  SELLER
+  CUSTOMER
+}
+
+Enum CustomerRole {
+  MEMBER
+  VIP_FAN
+  VIP_LOVER
+  VIP_LEGEND
+}
+
+Enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+Enum DeliveryType {
+  PICKUP
+  HOME_DELIVERY
+  SHIPPING
+}
+
+Enum ShipmentStatus {
+  PENDING
+  PREPARING
+  READY_FOR_PICKUP
+  SHIPPED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+}
+
+Enum PaymentStatus {
+  PENDING
+  AWAITING_REVIEW
+  APPROVED
+  REJECTED
+  REFUNDED
+  EXPIRED
+  CANCELLED
+}
+
+Enum PaymentMethod {
+  MANUAL_TRANSFER
+  CASH_ON_DELIVERY
+}
+
+Enum ProductStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+Enum RuleOperator {
+  ALL
+  ANY
+}
+
+Enum RuleType {
+  PRODUCT
+  CATEGORY
+  TAG
+  CART_MIN_TOTAL
+  CART_MIN_QUANTITY
+  CUSTOMER_ROLE
+  FIRST_PURCHASE
+}
+
+Enum ComparisonOperator {
+  EQUALS
+  NOT_EQUALS
+  IN
+  NOT_IN
+  GREATER_THAN
+  LESS_THAN
+  GREATER_OR_EQUAL
+  LESS_OR_EQUAL
+}
+
+Enum ActionType {
+  PERCENTAGE_DISCOUNT
+  FIXED_DISCOUNT
+  BUY_X_GET_Y
+}
+
+Enum ActionTarget {
+  PRODUCT
+  CART
+  CHEAPEST_ITEM
+}
+
+// ─── TABLES ─────────────────────────────────────────
+
+Table User {
+  id            String    [pk]
+  username      String    [unique]
+  email         String    [unique]
+  phone         String    [unique]
+  passwordHash  String
+  googleId      String    [unique]
+  firstName     String
+  lastName      String
+  phoneVerified Boolean   [default: false]
+  emailVerified Boolean   [default: false]
+  adminRole     AdminRole [default: 'CUSTOMER']
+  customerRole  CustomerRole
+  activeCartId  String    [unique]
+  lastLoginAt   DateTime
+  deletedAt     DateTime
+  createdAt     DateTime  [default: `now()`]
+  updatedAt     DateTime
+}
+
+Table Category {
+  id          String  [pk]
+  name        String
+  slug        String  [unique]
+  description String
+  image       String
+  emoticon    String
+  parentId    String
+  isActive    Boolean [default: true]
+  sortOrder   Int     [default: 0]
+  createdAt   DateTime [default: `now()`]
+  updatedAt   DateTime
+}
+
+Table AbstractProduct {
+  id          String        [pk]
+  title       String
+  slug        String        [unique]
+  description String
+  categoryId  String
+  tags        String
+  status      ProductStatus [default: 'DRAFT']
+  isFeatured  Boolean       [default: false]
+  publishedAt DateTime
+  seoMetadata Json
+  createdBy   String
+  deletedAt   DateTime
+  createdAt   DateTime      [default: `now()`]
+  updatedAt   DateTime
+}
+
+Table Product {
+  id                    String        [pk]
+  abstractProductId     String
+  title                 String
+  sku                   String        [unique]
+  priceInCents          Int
+  compareAtPriceInCents Int
+  details               Json
+  images                Json
+  status                ProductStatus [default: 'DRAFT']
+  createdBy             String
+  deletedAt             DateTime
+  createdAt             DateTime      [default: `now()`]
+  updatedAt             DateTime
+}
+
+Table ProductLike {
+  id                String   [pk]
+  userId            String
+  abstractProductId String
+  createdAt         DateTime [default: `now()`]
+
+  indexes {
+    (userId, abstractProductId) [unique]
+  }
+}
+
+Table Cart {
+  id         String   [pk]
+  customerId String
+  couponCode String
+  deletedAt  DateTime
+  createdAt  DateTime [default: `now()`]
+  updatedAt  DateTime
+}
+
+Table CartItem {
+  id        String   [pk]
+  cartId    String
+  productId String
+  quantity  Int      [default: 1]
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  indexes {
+    (cartId, productId) [unique]
+  }
+}
+
+Table Inventory {
+  id            String   [pk]
+  productId     String   [unique]
+  physicalStock Int      [default: 0]
+  reservedStock Int      [default: 0]
+  createdAt     DateTime [default: `now()`]
+  updatedAt     DateTime
+}
+
+Table Order {
+  id                   String      [pk]
+  customerId           String
+  status               OrderStatus [default: 'PENDING']
+  discountTotalInCents Int
+  addressSnapshot      Json
+  expiresAt            DateTime
+  createdAt            DateTime    [default: `now()`]
+  updatedAt            DateTime
+}
+
+Table OrderItem {
+  id        String   [pk]
+  orderId   String
+  productId String
+  quantity  Int
+  createdAt DateTime [default: `now()`]
+  updatedAt DateTime
+
+  indexes {
+    (orderId, productId) [unique]
+  }
+}
+
+Table OrderStatusAuditLog {
+  id             String      [pk]
+  orderId        String
+  previousStatus OrderStatus
+  newStatus      OrderStatus
+  changedBy      String
+  automatic      Boolean     [default: false]
+  changedAt      DateTime    [default: `now()`]
+}
+
+Table Payment {
+  id           String        [pk]
+  orderId      String
+  customerId   String
+  method       PaymentMethod
+  status       PaymentStatus [default: 'PENDING']
+  amount       Int
+  currency     String        [default: 'MXN']
+  providerData Json
+  reviewedBy   String
+  reviewedAt   DateTime
+  reviewNote   String
+  createdAt    DateTime      [default: `now()`]
+  updatedAt    DateTime
+}
+
+Table Address {
+  id               String   [pk]
+  userId           String
+  label            String
+  formattedAddress String
+  details          String
+  lat              Decimal
+  lng              Decimal
+  isDefault        Boolean  [default: false]
+  createdAt        DateTime [default: `now()`]
+  updatedAt        DateTime
+  deletedAt        DateTime
+}
+
+Table Shipment {
+  id           String         [pk]
+  orderId      String         [unique]
+  addressId    String
+  type         DeliveryType
+  deliveryFee  Int            [default: 0]
+  carrier      String
+  trackingCode String
+  status       ShipmentStatus [default: 'PENDING']
+  estimatedAt  DateTime
+  deliveredAt  DateTime
+  createdAt    DateTime       [default: `now()`]
+  updatedAt    DateTime
+}
+
+Table ShipmentEvent {
+  id         String         [pk]
+  shipmentId String
+  staffId    String
+  status     ShipmentStatus
+  note       String
+  createdAt  DateTime       [default: `now()`]
+}
+
+Table OTPCode {
+  id        String   [pk]
+  userId    String
+  code      String
+  phone     String
+  email     String
+  expiresAt DateTime
+  verified  Boolean  [default: false]
+  createdAt DateTime [default: `now()`]
+}
+
+Table RefreshToken {
+  id        String   [pk]
+  userId    String
+  token     String   [unique]
+  revoked   Boolean  [default: false]
+  expiresAt DateTime
+  createdAt DateTime [default: `now()`]
+}
+
+Table Promotion {
+  id             String       [pk]
+  name           String
+  description    String
+  couponCode     String       [unique]
+  priority       Int          [default: 0]
+  stackable      Boolean      [default: false]
+  isActive       Boolean      [default: true]
+  startsAt       DateTime
+  endsAt         DateTime
+  maxUsesPerUser Int
+  ruleOperator   RuleOperator [default: 'ALL']
+  imageUrl       String
+  colorPrimary   String
+  colorSecondary String
+  badgeText      String
+  badgeColor     String
+  deletedAt      DateTime
+  createdAt      DateTime     [default: `now()`]
+  updatedAt      DateTime
+}
+
+Table PromotionRule {
+  id          String             [pk]
+  promotionId String
+  type        RuleType
+  operator    ComparisonOperator
+  value       String
+  createdAt   DateTime           [default: `now()`]
+  updatedAt   DateTime
+}
+
+Table PromotionAction {
+  id                 String       [pk]
+  promotionId        String
+  type               ActionType
+  value              String
+  maxDiscountInCents Int
+  target             ActionTarget
+  createdAt          DateTime     [default: `now()`]
+  updatedAt          DateTime
+}
+
+Table PromotionUsage {
+  id                    String   [pk]
+  promotionId           String
+  userId                String
+  orderId               String
+  discountAmountInCents Int
+  usedAt                DateTime [default: `now()`]
+
+  indexes {
+    (promotionId, orderId) [unique]
+  }
+}
+
+// ─── RELATIONS ──────────────────────────────────────
+
+// User
+Ref: User.activeCartId - Cart.id
+
+// Category (self-referencing tree)
+Ref: Category.parentId > Category.id
+
+// AbstractProduct
+Ref: AbstractProduct.categoryId > Category.id
+Ref: AbstractProduct.createdBy > User.id
+
+// Product
+Ref: Product.abstractProductId > AbstractProduct.id
+Ref: Product.createdBy > User.id
+
+// ProductLike
+Ref: ProductLike.userId > User.id [delete: cascade]
+Ref: ProductLike.abstractProductId > AbstractProduct.id [delete: cascade]
+
+// Cart
+Ref: Cart.customerId > User.id
+
+// CartItem
+Ref: CartItem.cartId > Cart.id [delete: cascade]
+Ref: CartItem.productId > Product.id
+
+// Inventory
+Ref: Inventory.productId - Product.id
+
+// Order
+Ref: Order.customerId > User.id
+
+// OrderItem
+Ref: OrderItem.orderId > Order.id [delete: cascade]
+Ref: OrderItem.productId > Product.id
+
+// OrderStatusAuditLog
+Ref: OrderStatusAuditLog.orderId > Order.id [delete: cascade]
+Ref: OrderStatusAuditLog.changedBy > User.id
+
+// Payment
+Ref: Payment.orderId > Order.id
+Ref: Payment.customerId > User.id
+Ref: Payment.reviewedBy > User.id
+
+// Address
+Ref: Address.userId > User.id [delete: cascade]
+
+// Shipment
+Ref: Shipment.orderId - Order.id
+Ref: Shipment.addressId > Address.id
+
+// ShipmentEvent
+Ref: ShipmentEvent.shipmentId > Shipment.id [delete: cascade]
+Ref: ShipmentEvent.staffId > User.id
+
+// Auth
+Ref: OTPCode.userId > User.id [delete: cascade]
+Ref: RefreshToken.userId > User.id [delete: cascade]
+
+// Promotion
+Ref: PromotionRule.promotionId > Promotion.id [delete: cascade]
+Ref: PromotionAction.promotionId > Promotion.id [delete: cascade]
+Ref: PromotionUsage.promotionId > Promotion.id
+Ref: PromotionUsage.userId > User.id
+Ref: PromotionUsage.orderId > Order.id

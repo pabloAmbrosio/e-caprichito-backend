@@ -1,0 +1,14 @@
+export { assertProductExists } from './assert-product-exists';
+export { findProductOrFail } from './find-product-or-fail';
+export { buildCategoryBreadcrumb } from './build-category-breadcrumb';
+export { mapToProductDetail } from './map-to-product-detail';
+export { findProductBackofficeOrFail } from './find-product-backoffice-or-fail';
+export { mapToBackofficeDetail } from './map-to-backoffice-detail';
+export { executeProductUpdate } from './execute-product-update';
+export { softDeleteProduct } from './soft-delete-product';
+export { softDeleteVariant } from './soft-delete-variant';
+export { validateStatusTransition } from './validate-status-transition';
+export { changeProductStatus } from './change-product-status';
+export { changeVariantStatus } from './change-variant-status';
+export { addVariantsToProduct } from './add-variants-to-product';
+export { deriveThumbnails } from './derive-thumbnails';

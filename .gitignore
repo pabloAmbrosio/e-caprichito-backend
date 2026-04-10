@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.test
+*.log
+.DS_Store
+coverage
+src/generated
+.agents/
+public/
+*.backup.ts
+*.zip

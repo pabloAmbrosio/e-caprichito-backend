@@ -1,0 +1,1 @@
+export { backofficeInventoryRoutes } from './backoffice';
