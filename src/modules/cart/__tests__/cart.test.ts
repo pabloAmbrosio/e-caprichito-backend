@@ -12,6 +12,7 @@ let userId: string;
 let productId1: string;
 let productId2: string;
 let productId3: string; // sin stock
+let productIdDraft: string; // no publicado
 let categoryId: string;
 let sellerId: string;
 
@@ -141,6 +142,25 @@ beforeAll(async () => {
   });
   await db.inventory.create({ data: { productId: v3.id, physicalStock: 0, reservedStock: 0 } });
   productId3 = v3.id;
+
+  // Producto 4: DRAFT (no publicado)
+  const ap4 = await db.abstractProduct.create({
+    data: {
+      title: 'Producto Cart Draft', slug: 'test-cart-draft', description: 'No publicado',
+      categoryId, tags: ['test'], status: ProductStatus.DRAFT,
+      createdBy: sellerId,
+    },
+  });
+  const v4 = await db.product.create({
+    data: {
+      abstractProductId: ap4.id, title: 'Producto Cart Draft', sku: 'TEST-CART-004',
+      priceInCents: 10000, details: {},
+      images: [{ imageUrl: 'https://ph.com/4.jpg', thumbnailUrl: 'https://ph.com/4.jpg' }],
+      status: ProductStatus.DRAFT, createdBy: sellerId,
+    },
+  });
+  await db.inventory.create({ data: { productId: v4.id, physicalStock: 10, reservedStock: 0 } });
+  productIdDraft = v4.id;
 });
 
 afterAll(async () => {
@@ -461,5 +481,141 @@ describe('GET /api/cart/summary', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().data).toBeDefined();
+  });
+});
+
+// ─── EDGE CASES ────────────────────────────────────────────────
+
+describe('Edge cases', () => {
+  beforeEach(() => cleanupCarts());
+
+  it('sin autenticación devuelve 401', async () => {
+    const res = await app.inject({ method: 'GET', url: CART_URL });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('agregar producto DRAFT: el carrito no valida status al agregar', async () => {
+    // El carrito permite agregar productos DRAFT — la validación de status
+    // es responsabilidad del checkout, no del carrito.
+    const addRes = await addItem(productIdDraft, 1);
+    expect(addRes.statusCode).toBe(200);
+
+    const cart = await getCart();
+    expect(cart.data.items.length).toBe(1);
+  });
+
+  it('eliminar item que no está en el carrito', async () => {
+    // Crear carrito vacío
+    await getCart();
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `${CART_URL}/items/${productId1}`,
+      headers: auth(),
+    });
+
+    // Puede ser 404 (not found) o 200 (idempotente)
+    expect([200, 404].includes(res.statusCode)).toBe(true);
+  });
+
+  it('bulk add: agregar varios items a la vez', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `${CART_URL}/items/bulk`,
+      headers: auth(),
+      payload: {
+        items: [
+          { productId: productId1, quantity: 2 },
+          { productId: productId2, quantity: 1 },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    const cart = await getCart();
+    expect(cart.data.items.length).toBe(2);
+  });
+
+  it('bulk add: rechaza si uno de los productos no tiene stock', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `${CART_URL}/items/bulk`,
+      headers: auth(),
+      payload: {
+        items: [
+          { productId: productId1, quantity: 1 },
+          { productId: productId3, quantity: 1 }, // sin stock
+        ],
+      },
+    });
+
+    // El bulk debería fallar por el producto sin stock
+    expect([409, 400].includes(res.statusCode)).toBe(true);
+  });
+
+  it('restaurar carrito activo es idempotente (no rompe nada)', async () => {
+    await addItem(productId1, 1);
+    const user = await db.user.findUnique({ where: { id: userId }, select: { activeCartId: true } });
+    const activeCartId = user!.activeCartId!;
+
+    // Restaurar carrito que ya está activo — el backend lo permite (idempotente)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/carts/${activeCartId}/restore`,
+      headers: auth(),
+      payload: { cartId: activeCartId },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // El carrito sigue intacto
+    const cart = await getCart();
+    expect(cart.data.items.length).toBe(1);
+  });
+});
+
+// ─── CUPONES (pendiente de implementación en el front) ─────────
+
+describe('Cupones', () => {
+  beforeEach(() => cleanupCarts());
+
+  // TODO: Los cupones existen en el backend pero el front no los usa todavía.
+  // Cuando se decida implementar, descomentar y ajustar estos tests.
+
+  // it('aplicar cupón válido al carrito', async () => {
+  //   await addItem(productId1, 1);
+  //   const res = await app.inject({
+  //     method: 'POST', url: `${CART_URL}/coupon`, headers: auth(),
+  //     payload: { couponCode: 'BIENVENIDA' },
+  //   });
+  //   expect(res.statusCode).toBe(200);
+  // });
+
+  // it('aplicar cupón inválido es rechazado', async () => {
+  //   await addItem(productId1, 1);
+  //   const res = await app.inject({
+  //     method: 'POST', url: `${CART_URL}/coupon`, headers: auth(),
+  //     payload: { couponCode: 'NOEXISTE' },
+  //   });
+  //   expect([400, 404].includes(res.statusCode)).toBe(true);
+  // });
+
+  // it('remover cupón del carrito', async () => {
+  //   await addItem(productId1, 1);
+  //   await app.inject({
+  //     method: 'POST', url: `${CART_URL}/coupon`, headers: auth(),
+  //     payload: { couponCode: 'BIENVENIDA' },
+  //   });
+  //   const res = await app.inject({
+  //     method: 'DELETE', url: `${CART_URL}/coupon`, headers: auth(),
+  //   });
+  //   expect(res.statusCode).toBe(200);
+  // });
+
+  it('placeholder: cupones pendientes de decisión', () => {
+    // Cupones están implementados en backend pero no se usan en el front.
+    // Ver tests comentados arriba cuando se decida activarlos.
+    expect(true).toBe(true);
   });
 });
