@@ -13,7 +13,7 @@ export const seedDb = async (db: PrismaClient) => {
     await resetDB(db);
     console.log('🗑️  Datos anteriores eliminados');
 
-    await cleanupPaymentImages();
+    // await cleanupPaymentImages(); // desactivado — imágenes de Cloudinary se reutilizan
 
     await seedDemo(db);
     console.log('🎭 Datos de demo listos');
