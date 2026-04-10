@@ -608,3 +608,77 @@ describe('Cambiar regla de la promo: target diferente', () => {
     )).toBeUndefined();
   });
 });
+
+// ─── MOMENTO EXACTO DE EXPIRACIÓN + GRACE PERIOD ──────────────
+
+describe('Promo en el momento exacto de expiración', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('promo que expiró hace 1 segundo (sin grace period): ya no aplica', async () => {
+    await createTestPromo({
+      endsAt: new Date(Date.now() - 1000),
+    });
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeUndefined();
+  });
+
+  it('promo que expira en 1 segundo: todavía aplica', async () => {
+    await createTestPromo({
+      endsAt: new Date(Date.now() + 1000),
+    });
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeDefined();
+    expect(found.discountAmountInCents).toBe(10000);
+  });
+
+  it('promo expirada pero dentro del grace period: todavía aplica', async () => {
+    const originalGrace = process.env.PROMOTION_GRACE_PERIOD_MINUTES;
+    process.env.PROMOTION_GRACE_PERIOD_MINUTES = '5';
+
+    // Expiró hace 2 min — dentro del grace de 5 min
+    await createTestPromo({
+      endsAt: new Date(Date.now() - 2 * 60 * 1000),
+    });
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeDefined();
+
+    process.env.PROMOTION_GRACE_PERIOD_MINUTES = originalGrace || '0';
+  });
+
+  it('promo expirada FUERA del grace period: no aplica', async () => {
+    const originalGrace = process.env.PROMOTION_GRACE_PERIOD_MINUTES;
+    process.env.PROMOTION_GRACE_PERIOD_MINUTES = '5';
+
+    // Expiró hace 10 min — fuera del grace de 5 min
+    await createTestPromo({
+      endsAt: new Date(Date.now() - 10 * 60 * 1000),
+    });
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeUndefined();
+
+    process.env.PROMOTION_GRACE_PERIOD_MINUTES = originalGrace || '0';
+  });
+});
