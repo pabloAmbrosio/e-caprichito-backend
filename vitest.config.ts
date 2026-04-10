@@ -13,6 +13,10 @@ export default defineConfig({
       COOKIE_SECRET: 'test-cookie-secret',
       FRONTEND_URL: 'http://localhost:5173',
       PORT: '3001',
+      SMS_MODE: 'log',
+      REDIS_HOST: 'localhost',
+      REDIS_PORT: '6379',
+      REDIS_PASSWORD: 'caprichito123',
     },
     coverage: {
       provider: 'v8',
