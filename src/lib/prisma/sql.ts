@@ -15,4 +15,4 @@ export const isNotEmpty = (fragment: Sql): boolean => fragment !== empty;
 export const withRecursive = (ctes: Sql[]): Sql => sql`WITH RECURSIVE ${join(ctes, ',')}`;
 
 // Une fragmentos SQL con espacio (ideal para JOINs)
-export const joinAll = (fragments: Sql[]): Sql => join(fragments, ' ');
+export const joinAll = (fragments: Sql[]): Sql => fragments.length === 0 ? empty : join(fragments, ' ');
