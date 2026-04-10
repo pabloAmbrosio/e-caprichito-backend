@@ -393,3 +393,218 @@ describe('Soft delete de promo: desaparece del carrito', () => {
     )).toBeUndefined();
   });
 });
+
+// ─── PROMO RE-ACTIVADA ─────────────────────────────────────────
+
+describe('Promo re-activada después de desactivar', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('desactivar → reactivar: el descuento vuelve', async () => {
+    await createTestPromo();
+    await addItem(productId, 1);
+
+    // Aplica
+    const cart1 = await getCart();
+    expect(cart1.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    )).toBeDefined();
+
+    // Desactivar
+    await db.promotion.update({ where: { id: promoId }, data: { isActive: false } });
+
+    // No aplica
+    const cart2 = await getCart();
+    expect(cart2.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    )).toBeUndefined();
+
+    // Reactivar
+    await db.promotion.update({ where: { id: promoId }, data: { isActive: true } });
+
+    // Vuelve a aplicar
+    const cart3 = await getCart();
+    const promo = cart3.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(promo).toBeDefined();
+    expect(promo.discountAmountInCents).toBe(10000);
+  });
+});
+
+// ─── UNA PROMO EXPIRA, OTRA SOBREVIVE ──────────────────────────
+
+describe('Dos promos stackeadas: una expira, la otra sigue', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('la promo que sobrevive sigue aplicando sola', async () => {
+    // Promo A: 20% — expira pronto
+    const promoA = await db.promotion.create({
+      data: {
+        name: 'Test Lifecycle Promo A',
+        description: 'Expira',
+        couponCode: null,
+        priority: 50,
+        stackable: true,
+        isActive: true,
+        startsAt: new Date('2020-01-01'),
+        endsAt: new Date(Date.now() + 60000), // expira en 1 min
+        ruleOperator: 'ALL',
+        rules: { create: [{ type: 'TAG', operator: 'IN', value: 'lifecycle' }] },
+        actions: { create: [{ type: 'PERCENTAGE_DISCOUNT', value: '20', target: 'CART' }] },
+      },
+    });
+
+    // Promo B: 5% — no expira
+    await db.promotion.create({
+      data: {
+        name: 'Test Lifecycle Promo B',
+        description: 'Permanente',
+        couponCode: null,
+        priority: 40,
+        stackable: true,
+        isActive: true,
+        startsAt: new Date('2020-01-01'),
+        endsAt: null,
+        ruleOperator: 'ALL',
+        rules: { create: [{ type: 'TAG', operator: 'IN', value: 'lifecycle' }] },
+        actions: { create: [{ type: 'PERCENTAGE_DISCOUNT', value: '5', target: 'CART' }] },
+      },
+    });
+
+    await addItem(productId, 1); // $500
+
+    // Ambas aplican
+    const cartBoth = await getCart();
+    const promoABefore = cartBoth.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Promo A')
+    );
+    const promoBBefore = cartBoth.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Promo B')
+    );
+    expect(promoABefore).toBeDefined();
+    expect(promoBBefore).toBeDefined();
+
+    // Expirar promo A
+    await db.promotion.update({
+      where: { id: promoA.id },
+      data: { endsAt: new Date(Date.now() - 1000) },
+    });
+
+    // Solo promo B aplica
+    const cartAfter = await getCart();
+    const promoAAfter = cartAfter.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Promo A')
+    );
+    const promoBAfter = cartAfter.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Promo B')
+    );
+    expect(promoAAfter).toBeUndefined();
+    expect(promoBAfter).toBeDefined();
+    expect(promoBAfter.discountAmountInCents).toBeGreaterThan(0);
+  });
+});
+
+// ─── PROMO CON LÍMITE DE USO AGOTADO ──────────────────────────
+
+describe('Promo con maxUsesPerUser agotado', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('si el usuario ya usó la promo, no aplica más', async () => {
+    // Crear promo con maxUsesPerUser: 1
+    const promo = await createTestPromo({ maxUsesPerUser: 1 });
+
+    // Simular que ya la usó: crear una orden fake + PromotionUsage
+    const fakeOrder = await db.order.create({
+      data: {
+        customerId: userId,
+        status: 'CONFIRMED',
+        discountTotalInCents: 10000,
+      },
+    });
+    await db.promotionUsage.create({
+      data: {
+        promotionId: promo.id,
+        userId,
+        orderId: fakeOrder.id,
+        discountAmountInCents: 10000,
+      },
+    });
+
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeUndefined();
+
+    // Cleanup
+    await db.promotionUsage.deleteMany({ where: { promotionId: promo.id } });
+    await db.order.deleteMany({ where: { customerId: userId } });
+  });
+});
+
+// ─── PROMO QUE AÚN NO EMPIEZA ─────────────────────────────────
+
+describe('Promo con startsAt en el futuro', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('promo futura no aplica', async () => {
+    await createTestPromo({
+      startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // mañana
+    });
+
+    await addItem(productId, 1);
+
+    const cart = await getCart();
+    const found = cart.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    );
+    expect(found).toBeUndefined();
+  });
+});
+
+// ─── CAMBIAR REGLA DE LA PROMO ─────────────────────────────────
+
+describe('Cambiar regla de la promo: target diferente', () => {
+  beforeEach(async () => {
+    await cleanupCarts();
+    await cleanupPromos();
+  });
+
+  it('cambiar tag de "lifecycle" a "noexiste": pierde el descuento', async () => {
+    await createTestPromo();
+    await addItem(productId, 1); // tags: ['lifecycle', 'rosa']
+
+    // Aplica con tag "lifecycle"
+    const cartBefore = await getCart();
+    expect(cartBefore.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    )).toBeDefined();
+
+    // Cambiar la regla: ahora requiere tag "noexiste"
+    const rule = await db.promotionRule.findFirst({ where: { promotionId: promoId } });
+    await db.promotionRule.update({
+      where: { id: rule!.id },
+      data: { value: 'noexiste' },
+    });
+
+    // Ya no aplica
+    const cartAfter = await getCart();
+    expect(cartAfter.data.appliedPromotions.find(
+      (p: any) => p.promotionName.includes('Lifecycle')
+    )).toBeUndefined();
+  });
+});
