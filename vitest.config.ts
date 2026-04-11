@@ -18,6 +18,12 @@ export default defineConfig({
       REDIS_HOST: 'localhost',
       REDIS_PORT: '6379',
       REDIS_PASSWORD: 'caprichito123',
+      RATE_LIMIT_MAX: '10000',
+      AUTH_RATE_LIMIT_MAX: '10000',
+      PAYMENT_RATE_LIMIT_MAX: '10000',
+      READ_RATE_LIMIT_MAX: '10000',
+      INVENTORY_RATE_LIMIT_MAX: '10000',
+      COUPON_RATE_LIMIT_MAX: '10000',
     },
     coverage: {
       provider: 'v8',

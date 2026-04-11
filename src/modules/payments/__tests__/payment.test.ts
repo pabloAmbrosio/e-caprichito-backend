@@ -15,6 +15,7 @@ let token2: string;
 let userId2: string;
 
 let sellerId: string;
+let adminToken: string;
 let categoryId: string;
 let productId: string;
 
@@ -85,6 +86,21 @@ beforeAll(async () => {
     },
   });
   sellerId = seller.id;
+
+  // Admin (para reviews)
+  const admin = await db.user.create({
+    data: {
+      username: `${PREFIX}admin`, email: `${PREFIX}admin@test.com`,
+      passwordHash: await hashPassword('Test12345'),
+      adminRole: AdminRole.OWNER, customerRole: CustomerRole.MEMBER,
+      phoneVerified: true, emailVerified: true,
+    },
+  });
+  const adminLogin = await app.inject({
+    method: 'POST', url: '/api/auth/login',
+    payload: { identifier: `${PREFIX}admin`, password: 'Test12345' },
+  });
+  adminToken = adminLogin.json().data.accessToken;
 
   // Customer 1
   const c1 = await db.user.create({
@@ -388,5 +404,157 @@ describe('Protecciones de pago', () => {
       payload: { orderId: '00000000-0000-0000-0000-000000000000', method: 'MANUAL_TRANSFER' },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+// Helper: crear orden + pago + proof → listo para review
+async function createPaymentReadyForReview(t: string, uid: string, qty = 1) {
+  // Asegurar carrito limpio para este usuario
+  await db.user.update({ where: { id: uid }, data: { activeCartId: null } }).catch(() => {});
+  await db.cartItem.deleteMany({ where: { cart: { customerId: uid } } });
+  await db.cart.deleteMany({ where: { customerId: uid } });
+
+  const order = await createOrder(t, qty);
+
+  const payRes = await app.inject({
+    method: 'POST', url: PAYMENT_URL, headers: auth(t),
+    payload: { orderId: order.orderId, method: 'MANUAL_TRANSFER' },
+  });
+
+  if (payRes.statusCode !== 201) {
+    throw new Error(`Submit payment failed: ${payRes.statusCode} ${payRes.body}`);
+  }
+  const paymentId = payRes.json().data.id;
+
+  await app.inject({
+    method: 'PATCH', url: `${PAYMENT_URL}/${paymentId}/proof`, headers: auth(t),
+    payload: { screenshotUrl: 'https://res.cloudinary.com/test/image/upload/proof.jpg' },
+  });
+
+  return { orderId: order.orderId, paymentId };
+}
+
+// ─── ADMIN APRUEBA PAGO ───────────────────────────────────────
+
+describe('PATCH /api/backoffice/payments/:id/review — aprobar', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('aprobar pago: orden → CONFIRMED, stock físico baja', async () => {
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 3);
+
+    const invBefore = await db.inventory.findUnique({ where: { productId } });
+    expect(invBefore!.physicalStock).toBe(20);
+    expect(invBefore!.reservedStock).toBe(3); // reservado en checkout
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE', note: 'Pago verificado' },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // Verificar orden → CONFIRMED
+    const order = await db.order.findUnique({ where: { id: orderId } });
+    expect(order!.status).toBe('CONFIRMED');
+
+    // Verificar stock: physical baja 3, reserved baja 3
+    const invAfter = await db.inventory.findUnique({ where: { productId } });
+    expect(invAfter!.physicalStock).toBe(17);
+    expect(invAfter!.reservedStock).toBe(0);
+  });
+
+  it('aprobar pago: shipment avanza a PREPARING', async () => {
+    const { orderId } = await createPaymentReadyForReview(token1, userId1, 1);
+
+    const paymentId = (await db.payment.findFirst({ where: { orderId } }))!.id;
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+
+    const shipment = await db.shipment.findFirst({ where: { orderId } });
+    expect(shipment!.status).toBe('PREPARING');
+  });
+});
+
+// ─── ADMIN RECHAZA PAGO ───────────────────────────────────────
+
+describe('PATCH /api/backoffice/payments/:id/review — rechazar', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('rechazar pago: libera reservedStock, physicalStock no cambia', async () => {
+    const { paymentId } = await createPaymentReadyForReview(token1, userId1, 4);
+
+    const invBefore = await db.inventory.findUnique({ where: { productId } });
+    expect(invBefore!.reservedStock).toBe(4);
+    expect(invBefore!.physicalStock).toBe(20);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'REJECT', note: 'Comprobante ilegible' },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // reservedStock liberado, physicalStock intacto
+    const invAfter = await db.inventory.findUnique({ where: { productId } });
+    expect(invAfter!.reservedStock).toBe(0);
+    expect(invAfter!.physicalStock).toBe(20);
+  });
+});
+
+// ─── RACE CONDITION: DOS PAGOS APROBADOS, STOCK LIMITADO ──────
+
+describe('Concurrencia: aprobar dos pagos cuando el stock no alcanza', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    // Solo 3 de stock físico — si dos órdenes de 2 unidades se aprueban, una falla
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 3 } });
+  });
+
+  it('el segundo approve falla si no hay stock suficiente', async () => {
+    // Orden 1: 2 unidades
+    const { paymentId: pid1 } = await createPaymentReadyForReview(token1, userId1, 2);
+    // Orden 2: 2 unidades
+    const { paymentId: pid2 } = await createPaymentReadyForReview(token2, userId2, 2);
+
+    // Stock: physical=3, reserved=4 (2+2) — hay más reservado que físico
+
+    // Aprobar primero: OK (3 physical - 2 = 1 queda)
+    const approve1 = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${pid1}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+    expect(approve1.statusCode).toBe(200);
+
+    // Aprobar segundo: falla — solo queda 1 de stock y necesita 2
+    const approve2 = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${pid2}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+
+    // Debe fallar por stock insuficiente
+    expect(approve2.statusCode).not.toBe(200);
+
+    // Verificar que el stock no quedó negativo
+    const inv = await db.inventory.findUnique({ where: { productId } });
+    expect(inv!.physicalStock).toBeGreaterThanOrEqual(0);
   });
 });
