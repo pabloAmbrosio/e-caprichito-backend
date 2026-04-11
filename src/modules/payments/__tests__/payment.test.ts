@@ -558,3 +558,179 @@ describe('Concurrencia: aprobar dos pagos cuando el stock no alcanza', () => {
     expect(inv!.physicalStock).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ─── PAGO RECHAZADO → CLIENTE REINTENTA ───────────────────────
+
+describe('Flujo de reintento: rechazo → nuevo pago', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('después de rechazo, el cliente puede crear un nuevo pago', async () => {
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 2);
+
+    // Admin rechaza
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'REJECT', note: 'Comprobante borroso' },
+    });
+
+    // Verificar que el pago fue rechazado
+    const rejectedPayment = await db.payment.findUnique({ where: { id: paymentId } });
+    expect(rejectedPayment!.status).toBe('REJECTED');
+
+    // Cliente crea nuevo pago — debe funcionar (ya no hay PENDING/AWAITING_REVIEW)
+    const newPayRes = await app.inject({
+      method: 'POST', url: PAYMENT_URL, headers: auth(token1),
+      payload: { orderId, method: 'MANUAL_TRANSFER' },
+    });
+    expect(newPayRes.statusCode).toBe(201);
+    const newPaymentId = newPayRes.json().data.id;
+    expect(newPaymentId).not.toBe(paymentId); // es un pago nuevo
+
+    // Cliente sube nuevo comprobante
+    const proofRes = await app.inject({
+      method: 'PATCH', url: `${PAYMENT_URL}/${newPaymentId}/proof`, headers: auth(token1),
+      payload: { screenshotUrl: 'https://res.cloudinary.com/test/image/upload/nuevo-proof.jpg' },
+    });
+    expect(proofRes.statusCode).toBe(200);
+
+    // Admin aprueba el segundo intento
+    const approveRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${newPaymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE', note: 'Ahora sí se ve bien' },
+    });
+    expect(approveRes.statusCode).toBe(200);
+
+    // La orden queda CONFIRMED
+    const order = await db.order.findUnique({ where: { id: orderId } });
+    expect(order!.status).toBe('CONFIRMED');
+  });
+
+  it('no puede crear pago nuevo si el anterior aún está PENDING', async () => {
+    const order = await createOrder(token1, 1);
+
+    // Primer pago (PENDING)
+    await app.inject({
+      method: 'POST', url: PAYMENT_URL, headers: auth(token1),
+      payload: { orderId: order.orderId, method: 'MANUAL_TRANSFER' },
+    });
+
+    // Segundo pago — bloqueado, el primero sigue PENDING
+    const res = await app.inject({
+      method: 'POST', url: PAYMENT_URL, headers: auth(token1),
+      payload: { orderId: order.orderId, method: 'MANUAL_TRANSFER' },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+// ─── ORDEN EXPIRA MIENTRAS ADMIN REVISA EL PAGO ───────────────
+
+describe('Orden expira durante revisión de pago', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('BUG CONOCIDO: admin puede aprobar pago de orden cancelada → stock negativo', async () => {
+    // ⚠️ BUG: el review service NO verifica el status de la orden.
+    // Si la orden se cancela (libera stock) y luego el admin aprueba
+    // (decrementa stock otra vez), reservedStock queda negativo.
+    // TODO: agregar validación de orden status en review-payment.service.ts
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 3);
+
+    // Cancelar la orden (libera reservedStock: 3 → 0)
+    await app.inject({
+      method: 'PATCH', url: `/api/order/${orderId}/cancel`, headers: auth(token1),
+    });
+
+    const invAfterCancel = await db.inventory.findUnique({ where: { productId } });
+    expect(invAfterCancel!.reservedStock).toBe(0);
+
+    // Admin aprueba — actualmente NO falla (el bug)
+    const approveRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+    // Pasa con 200 (el bug permite esto)
+    expect(approveRes.statusCode).toBe(200);
+
+    // EVIDENCIA DEL BUG: reservedStock queda negativo
+    const invFinal = await db.inventory.findUnique({ where: { productId } });
+    expect(invFinal!.reservedStock).toBeLessThan(0);
+    // Cuando se corrija el bug, este test debe cambiar a:
+    // expect(approveRes.statusCode).not.toBe(200);
+    // expect(invFinal!.reservedStock).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ─── CLIENTE CANCELA MIENTRAS ADMIN APRUEBA ───────────────────
+
+describe('Race condition: cancelar orden vs aprobar pago', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('BUG CONOCIDO: cancel + approve = doble decremento de stock', async () => {
+    // ⚠️ Mismo bug que arriba — cancel libera reserved, approve decrementa otra vez
+    // TODO: review service debe verificar orden.status antes de aprobar
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 5);
+
+    expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(5);
+
+    // Cancel libera reserved: 5 → 0
+    await app.inject({
+      method: 'PATCH', url: `/api/order/${orderId}/cancel`, headers: auth(token1),
+    });
+    expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(0);
+
+    // Approve decrementa otra vez — stock negativo (el bug)
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+
+    const invFinal = await db.inventory.findUnique({ where: { productId } });
+    // BUG: reservedStock negativo
+    expect(invFinal!.reservedStock).toBeLessThan(0);
+  });
+
+  it('admin aprueba primero, luego cliente cancela: reserved queda negativo', async () => {
+    // ⚠️ Orden CONFIRMED es cancelable, pero cancel intenta liberar
+    // reservedStock que ya fue deducido por approve → negativo
+    // TODO: cancel de orden CONFIRMED no debe tocar reserved (ya fue deducido)
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 3);
+
+    // Approve: physical 20→17, reserved 3→0
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+
+    const invAfterApprove = await db.inventory.findUnique({ where: { productId } });
+    expect(invAfterApprove!.physicalStock).toBe(17);
+    expect(invAfterApprove!.reservedStock).toBe(0);
+
+    // Cancel: intenta liberar reserved otra vez → negativo
+    await app.inject({
+      method: 'PATCH', url: `/api/order/${orderId}/cancel`, headers: auth(token1),
+    });
+
+    const invFinal = await db.inventory.findUnique({ where: { productId } });
+    // BUG: reservedStock negativo
+    expect(invFinal!.reservedStock).toBeLessThan(0);
+  });
+});
