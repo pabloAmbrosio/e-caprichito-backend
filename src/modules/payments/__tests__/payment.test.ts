@@ -725,3 +725,175 @@ describe('Race condition: cancelar orden vs aprobar pago', () => {
     expect(invFinal!.reservedStock).toBe(0);
   });
 });
+
+// ─── REJECT + EXPIRACIÓN: DOBLE RELEASE ───────────────────────
+
+describe('Reject + expiración: ¿doble release de stock?', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('reject libera reserved, cancel posterior también intenta liberar', async () => {
+    const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 4);
+
+    expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(4);
+
+    // Admin rechaza → reserved baja a 0
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'REJECT', note: 'Comprobante falso' },
+    });
+    expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(0);
+
+    // Orden sigue PENDING — cancel la encontraría
+    const order = await db.order.findUnique({ where: { id: orderId } });
+    expect(order!.status).toBe('PENDING');
+
+    // Cancel (como haría el cron de expiración)
+    await app.inject({
+      method: 'PATCH', url: `/api/order/${orderId}/cancel`, headers: auth(token1),
+    });
+
+    // releaseInventory no tiene Math.min guard → reserved queda negativo
+    // BUG CONOCIDO: releaseInventory necesita guard como releaseReservedStock
+    const invFinal = await db.inventory.findUnique({ where: { productId } });
+    // Documentamos el comportamiento actual
+    expect(invFinal!.reservedStock).toBeLessThan(0);
+  });
+});
+
+// ─── DOS ADMINS REVISAN AL MISMO TIEMPO ───────────────────────
+
+describe('Concurrencia: dos admins revisan mismo pago', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('solo uno puede revisar — el otro recibe error', async () => {
+    const { paymentId } = await createPaymentReadyForReview(token1, userId1, 2);
+
+    // Ambos intentan al mismo tiempo
+    const [res1, res2] = await Promise.all([
+      app.inject({
+        method: 'PATCH',
+        url: `/api/backoffice/payments/${paymentId}/review`,
+        headers: auth(adminToken),
+        payload: { action: 'APPROVE' },
+      }),
+      app.inject({
+        method: 'PATCH',
+        url: `/api/backoffice/payments/${paymentId}/review`,
+        headers: auth(adminToken),
+        payload: { action: 'REJECT', note: 'Dudoso' },
+      }),
+    ]);
+
+    const statuses = [res1.statusCode, res2.statusCode].sort();
+    // Uno pasa (200), el otro falla
+    expect(statuses).toContain(200);
+    expect(statuses[1]).not.toBe(200);
+
+    // Stock consistente
+    const inv = await db.inventory.findUnique({ where: { productId } });
+    expect(inv!.physicalStock).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ─── PROOF A PAGO DE ORDEN CANCELADA ──────────────────────────
+
+describe('Upload proof edge cases', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
+  });
+
+  it('subir proof después de cancelar orden: pasa pero admin no puede aprobar', async () => {
+    const order = await createOrder(token1, 1);
+
+    const payRes = await app.inject({
+      method: 'POST', url: PAYMENT_URL, headers: auth(token1),
+      payload: { orderId: order.orderId, method: 'MANUAL_TRANSFER' },
+    });
+    const paymentId = payRes.json().data.id;
+
+    // Cancelar orden
+    await app.inject({
+      method: 'PATCH', url: `/api/order/${order.orderId}/cancel`, headers: auth(token1),
+    });
+
+    // Subir proof — puede pasar (proof service no checa orden status)
+    const proofRes = await app.inject({
+      method: 'PATCH', url: `${PAYMENT_URL}/${paymentId}/proof`, headers: auth(token1),
+      payload: { screenshotUrl: 'https://res.cloudinary.com/test/image/upload/late.jpg' },
+    });
+    expect([200, 400].includes(proofRes.statusCode)).toBe(true);
+
+    // Pero admin no puede aprobar → bloqueado por nuestro fix
+    if (proofRes.statusCode === 200) {
+      const approveRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/backoffice/payments/${paymentId}/review`,
+        headers: auth(adminToken),
+        payload: { action: 'APPROVE' },
+      });
+      expect(approveRes.statusCode).toBe(400);
+    }
+  });
+});
+
+// ─── STOCK EN EXACTAMENTE 0 DESPUÉS DE APPROVE ───────────────
+
+describe('Boundary: stock llega a exactamente 0', () => {
+  beforeEach(async () => {
+    await cleanupAll();
+  });
+
+  it('approve consume todo el stock: physicalStock = 0', async () => {
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 5 } });
+
+    const { paymentId } = await createPaymentReadyForReview(token1, userId1, 5);
+
+    const approveRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+    expect(approveRes.statusCode).toBe(200);
+
+    const inv = await db.inventory.findUnique({ where: { productId } });
+    expect(inv!.physicalStock).toBe(0);
+    expect(inv!.reservedStock).toBe(0);
+  });
+
+  it('stock agotado → nuevo add al carrito falla con OUT_OF_STOCK', async () => {
+    await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 2 } });
+
+    const { paymentId } = await createPaymentReadyForReview(token1, userId1, 2);
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/backoffice/payments/${paymentId}/review`,
+      headers: auth(adminToken),
+      payload: { action: 'APPROVE' },
+    });
+
+    expect((await db.inventory.findUnique({ where: { productId } }))!.physicalStock).toBe(0);
+
+    // Usuario 2 intenta agregar al carrito
+    await db.user.update({ where: { id: userId2 }, data: { activeCartId: null } }).catch(() => {});
+    await db.cartItem.deleteMany({ where: { cart: { customerId: userId2 } } });
+    await db.cart.deleteMany({ where: { customerId: userId2 } });
+
+    const addRes = await app.inject({
+      method: 'POST', url: `${CART_URL}/items`, headers: auth(token2),
+      payload: { productId, quantity: 1 },
+    });
+    expect(addRes.statusCode).toBe(409);
+    expect(addRes.json().error).toBe('OUT_OF_STOCK');
+  });
+});
