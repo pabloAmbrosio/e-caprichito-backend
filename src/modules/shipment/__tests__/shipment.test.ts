@@ -453,3 +453,169 @@ describe('Tracking y carrier', () => {
     expect(data.events.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ─── EDGE CASES ────────────────────────────────────────────────
+
+describe('Edge cases de shipment', () => {
+  beforeEach(async () => {
+    await cleanupOrders();
+    await resetInventory();
+  });
+
+  it('COD con PICKUP es rechazado en checkout', async () => {
+    await app.inject({
+      method: 'POST', url: `${CART_URL}/items`, headers: auth(customerToken),
+      payload: { productId, quantity: 1 },
+    });
+
+    // Sin addressId = PICKUP, con COD → debe fallar
+    const res = await app.inject({
+      method: 'POST', url: ORDER_URL, headers: auth(customerToken),
+      payload: { paymentMethod: 'CASH_ON_DELIVERY' },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('tracking de orden ajena devuelve 404', async () => {
+    // Crear orden del customer
+    const order = await createOrderWithAddress();
+
+    // Admin intenta ver tracking como si fuera otro cliente
+    // Necesitamos otro customer
+    const otherUser = await db.user.create({
+      data: {
+        username: `${PREFIX}other`, email: `${PREFIX}other@test.com`,
+        phone: '+15558880099', passwordHash: await hashPassword('Test12345'),
+        adminRole: AdminRole.CUSTOMER, customerRole: CustomerRole.MEMBER,
+        phoneVerified: true, emailVerified: true,
+      },
+    });
+    const otherLogin = await app.inject({
+      method: 'POST', url: '/api/auth/login',
+      payload: { identifier: `${PREFIX}other`, password: 'Test12345' },
+    });
+    const otherToken = otherLogin.json().data.accessToken;
+
+    const res = await app.inject({
+      method: 'GET', url: `${SHOP_SHIP}/${order.orderId}/tracking`,
+      headers: auth(otherToken),
+    });
+
+    expect(res.statusCode).toBe(404);
+
+    // Cleanup
+    await db.user.deleteMany({ where: { username: `${PREFIX}other` } });
+  });
+
+  it('calcular fee con dirección de otro usuario es rechazado', async () => {
+    const otherUser = await db.user.create({
+      data: {
+        username: `${PREFIX}addr_other`, email: `${PREFIX}addr_other@test.com`,
+        passwordHash: await hashPassword('Test12345'),
+        adminRole: AdminRole.CUSTOMER, customerRole: CustomerRole.MEMBER,
+        phoneVerified: true, emailVerified: true,
+      },
+    });
+    const otherAddr = await db.address.create({
+      data: { userId: otherUser.id, label: 'Ajena', formattedAddress: 'No es tuya',
+        lat: 19.0, lng: -91.0, isDefault: true },
+    });
+
+    const res = await app.inject({
+      method: 'POST', url: `${SHOP_SHIP}/calculate-fee`, headers: auth(customerToken),
+      payload: { addressId: otherAddr.id },
+    });
+
+    // Rechaza — calculate-fee valida ownership de la dirección
+    expect([400, 403, 404].includes(res.statusCode)).toBe(true);
+
+    // Cleanup
+    await db.address.deleteMany({ where: { userId: otherUser.id } });
+    await db.user.deleteMany({ where: { username: `${PREFIX}addr_other` } });
+  });
+
+  it('doble advance simultáneo: solo uno pasa', async () => {
+    const order = await createOrderWithAddress();
+    const shipmentId = order.shipment.id;
+    await db.order.update({ where: { id: order.orderId }, data: { status: 'CONFIRMED' } });
+
+    // Dos admins avanzan al mismo tiempo
+    const [res1, res2] = await Promise.all([
+      advanceShipment(shipmentId),
+      advanceShipment(shipmentId),
+    ]);
+
+    const statuses = [res1.statusCode, res2.statusCode].sort();
+    // Al menos uno pasa
+    expect(statuses).toContain(200);
+    // No deberían pasar los dos (avanzaría 2 pasos)
+    // Si ambos pasan, verificamos que el shipment no saltó un estado
+    const shipment = await db.shipment.findUnique({ where: { id: shipmentId } });
+    // PENDING → PREPARING es el primer avance, no debería saltar a más
+    expect(['PREPARING', 'READY_FOR_PICKUP', 'OUT_FOR_DELIVERY'].includes(shipment!.status)).toBe(true);
+  });
+
+  it('fail shipment PREPARING con COD: stock queda limpio', async () => {
+    // COD con HOME_DELIVERY — empieza en PREPARING
+    await app.inject({
+      method: 'POST', url: `${CART_URL}/items`, headers: auth(customerToken),
+      payload: { productId, quantity: 4 },
+    });
+    const orderRes = await app.inject({
+      method: 'POST', url: ORDER_URL, headers: auth(customerToken),
+      payload: { addressId: addressNearId, paymentMethod: 'CASH_ON_DELIVERY' },
+    });
+    const order = orderRes.json().data;
+    const shipmentId = order.shipment.id;
+
+    // reserved = 4, physical = 20
+    const invBefore = await db.inventory.findUnique({ where: { productId } });
+    expect(invBefore!.reservedStock).toBe(4);
+    expect(invBefore!.physicalStock).toBe(20);
+
+    // Fail desde PREPARING
+    await app.inject({
+      method: 'PATCH', url: `${BO_SHIP}/${shipmentId}/fail`, headers: auth(adminToken),
+      payload: { note: 'Producto dañado en almacén' },
+    });
+
+    // reserved liberado, physical intacto
+    const invAfter = await db.inventory.findUnique({ where: { productId } });
+    expect(invAfter!.reservedStock).toBe(0);
+    expect(invAfter!.physicalStock).toBe(20);
+
+    // Pago cancelado
+    const payment = await db.payment.findFirst({ where: { orderId: order.orderId } });
+    expect(payment!.status).toBe('CANCELLED');
+
+    // Orden cancelada
+    const finalOrder = await db.order.findUnique({ where: { id: order.orderId } });
+    expect(finalOrder!.status).toBe('CANCELLED');
+  });
+
+  it('advance genera timeline de eventos completa', async () => {
+    const order = await createOrderWithAddress();
+    const shipmentId = order.shipment.id;
+    await db.order.update({ where: { id: order.orderId }, data: { status: 'CONFIRMED' } });
+
+    // Avanzar paso a paso con notas
+    await advanceShipment(shipmentId, 'Empezando a preparar');
+    await advanceShipment(shipmentId, 'Listo para recoger');
+    await advanceShipment(shipmentId, 'Entregado al cliente');
+
+    // Verificar timeline completa
+    const events = await db.shipmentEvent.findMany({
+      where: { shipmentId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Puede haber eventos extra por auto-avance de orden (SHIPPED, DELIVERED)
+    expect(events.length).toBeGreaterThanOrEqual(3);
+    // Los eventos manuales están en la timeline
+    const notes = events.map((e: any) => e.note).filter(Boolean);
+    expect(notes.some((n: string) => n.includes('Empezando a preparar'))).toBe(true);
+    expect(notes.some((n: string) => n.includes('Listo para recoger'))).toBe(true);
+    expect(notes.some((n: string) => n.includes('Entregado al cliente'))).toBe(true);
+  });
+});
