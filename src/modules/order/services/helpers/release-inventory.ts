@@ -5,12 +5,20 @@ export async function releaseInventory(
   tx: TxClient,
   items: OrderItemQuantity[],
 ) {
-  await Promise.all(
-    items.map(({ productId, quantity }) =>
-      tx.inventory.update({
-        where: { productId },
-        data: { reservedStock: { decrement: quantity } },
-      }),
-    ),
-  );
+  for (const { productId, quantity } of items) {
+    const inventory = await tx.inventory.findUnique({
+      where: { productId },
+      select: { reservedStock: true },
+    });
+
+    if (!inventory) continue;
+
+    const decrementAmount = Math.min(quantity, inventory.reservedStock);
+    if (decrementAmount <= 0) continue;
+
+    await tx.inventory.update({
+      where: { productId },
+      data: { reservedStock: { decrement: decrementAmount } },
+    });
+  }
 }

@@ -734,7 +734,7 @@ describe('Reject + expiración: ¿doble release de stock?', () => {
     await db.inventory.updateMany({ where: { productId }, data: { reservedStock: 0, physicalStock: 20 } });
   });
 
-  it('reject libera reserved, cancel posterior también intenta liberar', async () => {
+  it('reject libera reserved, cancel posterior no deja negativo (Math.min guard)', async () => {
     const { orderId, paymentId } = await createPaymentReadyForReview(token1, userId1, 4);
 
     expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(4);
@@ -748,20 +748,18 @@ describe('Reject + expiración: ¿doble release de stock?', () => {
     });
     expect((await db.inventory.findUnique({ where: { productId } }))!.reservedStock).toBe(0);
 
-    // Orden sigue PENDING — cancel la encontraría
+    // Orden sigue PENDING
     const order = await db.order.findUnique({ where: { id: orderId } });
     expect(order!.status).toBe('PENDING');
 
-    // Cancel (como haría el cron de expiración)
+    // Cancel intenta liberar otra vez — Math.min guard evita negativo
     await app.inject({
       method: 'PATCH', url: `/api/order/${orderId}/cancel`, headers: auth(token1),
     });
 
-    // releaseInventory no tiene Math.min guard → reserved queda negativo
-    // BUG CONOCIDO: releaseInventory necesita guard como releaseReservedStock
     const invFinal = await db.inventory.findUnique({ where: { productId } });
-    // Documentamos el comportamiento actual
-    expect(invFinal!.reservedStock).toBeLessThan(0);
+    expect(invFinal!.reservedStock).toBe(0);
+    expect(invFinal!.physicalStock).toBe(20);
   });
 });
 
