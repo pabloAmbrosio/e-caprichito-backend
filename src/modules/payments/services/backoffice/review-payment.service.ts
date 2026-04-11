@@ -8,6 +8,7 @@ import {
   PaymentNotAwaitingReviewError,
   InsufficientStockError,
   UnauthorizedReviewerError,
+  OrderNotPendingError,
 } from '../../errors';
 import { getNextStatus } from '../../../shipment/helpers';
 import { logStatusChange } from '../../../order/services/helpers/log-status-change';
@@ -85,6 +86,11 @@ export const reviewPayment = async (
 
   if (payment.status !== 'AWAITING_REVIEW') {
     throw new PaymentNotAwaitingReviewError();
+  }
+
+  // Verificar que la orden siga en un estado válido para revisión
+  if (payment.order.status === 'CANCELLED') {
+    throw new OrderNotPendingError();
   }
 
   // === REJECT ===

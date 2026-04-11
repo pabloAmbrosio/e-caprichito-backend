@@ -22,7 +22,12 @@ export async function cancelOrderBackofficeService(
 
     assertCancellableBackoffice(order.status);
 
-    await releaseInventory(tx, order.items);
+    // Solo liberar reservedStock si la orden estaba PENDING.
+    // Si estaba CONFIRMED (pago aprobado), el stock ya fue deducido
+    // de physical y reserved por el review — no hay nada que liberar.
+    if (order.status === 'PENDING') {
+      await releaseInventory(tx, order.items);
+    }
 
     await markAsCancelled(tx, orderId);
 
