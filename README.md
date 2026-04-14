@@ -1,8 +1,8 @@
 # E-Caprichito — Backend
 
-Backend de una tienda online real (El Caprichito). Empezó como un proyecto para resolver un problema de una conocida que vendía por WhatsApp y terminó siendo el lugar donde practico arquitectura, testing y patrones que no cabían en proyectos más chicos.
+Backend del e-commerce de El Caprichito, un local que ya opera de forma presencial y que está dando el salto a venta online. No es un proyecto de ejemplo: va a producción, con clientes reales y plata real de por medio.
 
-Lo hice solo, de cero. No es un clon de un tutorial.
+Lo hice solo, de cero, y lo uso también como el proyecto donde me doy el lujo de practicar arquitectura y patrones que no cabían en trabajos anteriores.
 
 ## Qué hace
 
