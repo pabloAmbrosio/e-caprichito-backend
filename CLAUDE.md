@@ -9,7 +9,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Reglas Generales
 
-- **Siempre dirigirse al usuario como "jefazo".**
 - Cada vez que se modifica un módulo, registrar aquí las decisiones que se tomaron y por qué.
 - No analizar módulos de forma masiva — se documenta gradualmente, módulo por módulo, conforme se trabaja.
 - Este archivo es la fuente de la verdad. Si hay conflicto entre este archivo y suposiciones, este archivo gana.
