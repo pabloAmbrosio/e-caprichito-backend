@@ -83,4 +83,4 @@ En desarrollo activo. Lo que está en `main` compila, los tests pasan y el flujo
 
 ---
 
-Cualquier pregunta o si ves algo raro, abre un issue o escríbeme.
+Para dudas o comentarios, pueden abrir un issue o contactarme directamente.
