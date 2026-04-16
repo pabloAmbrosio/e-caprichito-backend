@@ -24,7 +24,7 @@ export const gorras_infantilesSeed = [
       "sol",
       "protección solar"
     ],
-    "priceInCents": 22099,
+    "priceInCents": 7900,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, amarillo, azul, cafe",
@@ -65,7 +65,7 @@ export const gorras_infantilesSeed = [
       "accesorios bebe",
       "protección solar"
     ],
-    "priceInCents": 26999,
+    "priceInCents": 8500,
     "details": {
       "mainColor": "amarillo",
       "colors": "amarillo, blanco, naranja",
@@ -106,7 +106,7 @@ export const gorras_infantilesSeed = [
       "accesorios bebe",
       "protección solar"
     ],
-    "priceInCents": 36099,
+    "priceInCents": 8900,
     "details": {
       "mainColor": "amarillo",
       "colors": "amarillo, blanco, naranja",
@@ -147,7 +147,7 @@ export const gorras_infantilesSeed = [
       "accesorios bebe",
       "protección solar"
     ],
-    "priceInCents": 26399,
+    "priceInCents": 8200,
     "details": {
       "mainColor": "amarillo",
       "colors": "amarillo, blanco, naranja",
@@ -188,7 +188,7 @@ export const gorras_infantilesSeed = [
       "accesorios bebe",
       "protección solar"
     ],
-    "priceInCents": 25799,
+    "priceInCents": 8000,
     "details": {
       "mainColor": "amarillo",
       "colors": "amarillo, blanco, naranja",
@@ -231,8 +231,8 @@ export const gorras_infantilesSeed = [
       "accesorios",
       "sol"
     ],
-    "priceInCents": 25699,
-    "compareAtPriceInCents": 31199,
+    "priceInCents": 7900,
+    "compareAtPriceInCents": 9500,
     "details": {
       "mainColor": "rosado",
       "colors": "rosado, blanco, naranja, verde",
@@ -275,7 +275,7 @@ export const gorras_infantilesSeed = [
       "infantil",
       "accesorios bebé"
     ],
-    "priceInCents": 33699,
+    "priceInCents": 8600,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, blanco, amarillo, verde",
@@ -317,7 +317,7 @@ export const gorras_infantilesSeed = [
       "protección solar",
       "divertido"
     ],
-    "priceInCents": 27799,
+    "priceInCents": 8400,
     "details": {
       "mainColor": "rosado",
       "colors": "rosado, azul, naranja, blanco",
@@ -361,7 +361,7 @@ export const gorras_infantilesSeed = [
       "sol",
       "moda"
     ],
-    "priceInCents": 38099,
+    "priceInCents": 9200,
     "details": {
       "mainColor": "rosado",
       "colors": "rosado, blanco, multicolor",
@@ -402,7 +402,7 @@ export const gorras_infantilesSeed = [
       "sol",
       "kawaii"
     ],
-    "priceInCents": 32399,
+    "priceInCents": 9500,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, blanco, celeste",
@@ -444,8 +444,8 @@ export const gorras_infantilesSeed = [
       "rosa",
       "sol"
     ],
-    "priceInCents": 11900,
-    "compareAtPriceInCents": 14899,
+    "priceInCents": 7900,
+    "compareAtPriceInCents": 8999,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, blanco, negro",
@@ -486,7 +486,7 @@ export const gorras_infantilesSeed = [
       "sol",
       "infantil"
     ],
-    "priceInCents": 38199,
+    "priceInCents": 9800,
     "details": {
       "mainColor": "rojo",
       "colors": "rojo, blanco, rosa",
@@ -528,8 +528,8 @@ export const gorras_infantilesSeed = [
       "verano",
       "infantil"
     ],
-    "priceInCents": 22399,
-    "compareAtPriceInCents": 29499,
+    "priceInCents": 7999,
+    "compareAtPriceInCents": 9900,
     "details": {
       "mainColor": "amarillo",
       "colors": "amarillo, verde, marrón",
@@ -571,7 +571,7 @@ export const gorras_infantilesSeed = [
       "accesorios",
       "infantil"
     ],
-    "priceInCents": 32499,
+    "priceInCents": 8800,
     "details": {
       "mainColor": "naranja",
       "colors": "naranja, verde, marrón, blanco, turquesa",
@@ -613,7 +613,7 @@ export const gorras_infantilesSeed = [
       "gorro niña",
       "sanrio"
     ],
-    "priceInCents": 29799,
+    "priceInCents": 8900,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, blanco, negro, lila",
@@ -656,7 +656,7 @@ export const gorras_infantilesSeed = [
       "moda",
       "verano"
     ],
-    "priceInCents": 32499,
+    "priceInCents": 9200,
     "details": {
       "mainColor": "rosa",
       "colors": "rosa, blanco, lila",
@@ -698,7 +698,7 @@ export const gorras_infantilesSeed = [
       "amarillo",
       "moda infantil"
     ],
-    "priceInCents": 35799,
+    "priceInCents": 9600,
     "details": {
       "mainColor": "Amarillo",
       "colors": "Amarillo, Blanco, Naranja, Verde",
@@ -741,8 +741,8 @@ export const gorras_infantilesSeed = [
       "amarillo",
       "moda infantil"
     ],
-    "priceInCents": 39599,
-    "compareAtPriceInCents": 53499,
+    "priceInCents": 8500,
+    "compareAtPriceInCents": 9900,
     "details": {
       "mainColor": "Amarillo",
       "colors": "Amarillo, Blanco, Naranja, Verde",
@@ -785,7 +785,7 @@ export const gorras_infantilesSeed = [
       "amarillo",
       "moda infantil"
     ],
-    "priceInCents": 32899,
+    "priceInCents": 8700,
     "details": {
       "mainColor": "Amarillo",
       "colors": "Amarillo, Blanco, Naranja, Verde",
@@ -828,7 +828,7 @@ export const gorras_infantilesSeed = [
       "amarillo",
       "moda infantil"
     ],
-    "priceInCents": 31799,
+    "priceInCents": 8300,
     "details": {
       "mainColor": "Amarillo",
       "colors": "Amarillo, Blanco, Naranja, Verde",
@@ -870,7 +870,7 @@ export const gorras_infantilesSeed = [
       "accesorio",
       "infantil"
     ],
-    "priceInCents": 38299,
+    "priceInCents": 9400,
     "details": {
       "mainColor": "celeste",
       "colors": "celeste, naranja, blanco, negro",
@@ -910,7 +910,7 @@ export const gorras_infantilesSeed = [
       "accesorios bebe",
       "protector solar"
     ],
-    "priceInCents": 34199,
+    "priceInCents": 9100,
     "details": {
       "mainColor": "celeste",
       "colors": "celeste, amarillo, cafe",
@@ -953,8 +953,8 @@ export const gorras_infantilesSeed = [
       "sol",
       "verano"
     ],
-    "priceInCents": 38699,
-    "compareAtPriceInCents": 51499,
+    "priceInCents": 8600,
+    "compareAtPriceInCents": 9900,
     "details": {
       "mainColor": "rosado",
       "colors": "rosado, blanco, multicolor",

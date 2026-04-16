@@ -13,7 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:seed": "yarn prisma db seed",
-    "db:reset": "prisma db push --force-reset && yarn db:seed",
+    "db:reset": "prisma migrate reset --force && prisma db execute --file prisma/post-reset.sql && yarn db:seed",
     "db:test:push": "DATABASE_URL=postgresql://caprichito:caprichito123@localhost:5433/caprichito_test?schema=public prisma db push",
     "db:test:extensions": "docker exec caprichito-db-test psql -U caprichito -d caprichito_test -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'",
     "pretest": "yarn db:test:push && yarn db:test:extensions",
