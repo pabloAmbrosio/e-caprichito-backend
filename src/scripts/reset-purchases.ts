@@ -2,8 +2,8 @@
  * Reset parcial: borra todo lo relacionado con compras para poder hacer
  * pruebas limpias sin inventario reservado ni ordenes muertas.
  *
- * Preserva: usuarios, productos, categorias, direcciones, promociones.
- * Limpia: ordenes, pagos, envios, carritos, uso de promociones.
+ * Preserva: usuarios, productos, categorias, promociones.
+ * Limpia: ordenes, pagos, envios, carritos, uso de promociones, direcciones.
  * Resetea: Inventory.reservedStock a 0 (physicalStock intacto).
  *
  * Uso:
@@ -32,6 +32,8 @@ async function main() {
     const cartItems = await tx.cartItem.deleteMany();
     const carts = await tx.cart.deleteMany();
 
+    const addresses = await tx.address.deleteMany();
+
     const inventory = await tx.inventory.updateMany({
       data: { reservedStock: 0 },
     });
@@ -46,6 +48,7 @@ async function main() {
       promotionUsages: promotionUsages.count,
       cartItems: cartItems.count,
       carts: carts.count,
+      addresses: addresses.count,
       inventoriesReset: inventory.count,
     };
   });
@@ -60,6 +63,7 @@ async function main() {
   console.log(`   promotion usages:     ${result.promotionUsages}`);
   console.log(`   carritos:             ${result.carts}`);
   console.log(`   cart items:           ${result.cartItems}`);
+  console.log(`   direcciones:          ${result.addresses}`);
   console.log(`   reservedStock a 0:    ${result.inventoriesReset} productos`);
 
   await cleanupPaymentImages();
