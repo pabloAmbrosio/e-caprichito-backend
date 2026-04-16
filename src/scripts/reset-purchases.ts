@@ -4,7 +4,7 @@
  *
  * Preserva: usuarios, productos, categorias, promociones.
  * Limpia: ordenes, pagos, envios, carritos, uso de promociones, direcciones.
- * Resetea: Inventory.reservedStock a 0 (physicalStock intacto).
+ * Resetea: Inventory a estado de seed (physicalStock=1, reservedStock=0).
  *
  * Uso:
  *   yarn db:reset:purchases
@@ -35,7 +35,7 @@ async function main() {
     const addresses = await tx.address.deleteMany();
 
     const inventory = await tx.inventory.updateMany({
-      data: { reservedStock: 0 },
+      data: { physicalStock: 1, reservedStock: 0 },
     });
 
     return {
@@ -64,7 +64,7 @@ async function main() {
   console.log(`   carritos:             ${result.carts}`);
   console.log(`   cart items:           ${result.cartItems}`);
   console.log(`   direcciones:          ${result.addresses}`);
-  console.log(`   reservedStock a 0:    ${result.inventoriesReset} productos`);
+  console.log(`   inventario reseteado:  ${result.inventoriesReset} productos (stock=1, reserved=0)`);
 
   await cleanupPaymentImages();
 }
